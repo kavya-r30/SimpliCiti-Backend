@@ -1,16 +1,95 @@
+import asyncio
+import json
 import os
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+import uuid
+import json
+import asyncio
+from datetime import datetime
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
 from evaluator import ResumeEvaluator
-# from email_composer import EmailComposer
 from storage import DatabaseManager
 from models import *
 
+# === Globals ===
+meetings_db = []
+
+# Sample test meetings
+test_meetings = [
+    {
+        "id": "abc123",
+        "title": "Technical Interview - Frontend",
+        "participant": "John Doe",
+        "created_at": datetime.now().isoformat(),
+        "status": "scheduled"
+    },
+    {
+        "id": "meet456",
+        "title": "HR Discussion",
+        "participant": "Jane Smith",
+        "created_at": datetime.now().isoformat(),
+        "status": "scheduled"
+    },
+    {
+        "id": "int789",
+        "title": "Final Round - Backend",
+        "participant": "Mike Johnson",
+        "created_at": datetime.now().isoformat(),
+        "status": "scheduled"
+    }
+]
+
+meetings_db.extend(test_meetings)
+
+# === WebSocket Connection Manager ===
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, meeting_id: str):
+        await websocket.accept()
+        if meeting_id not in self.active_connections:
+            self.active_connections[meeting_id] = []
+        self.active_connections[meeting_id].append(websocket)
+
+        # Notify others
+        await self.broadcast_to_meeting(meeting_id, {
+            "type": "user-joined",
+            "user": "Participant"
+        }, exclude=websocket)
+
+    def disconnect(self, websocket: WebSocket, meeting_id: str):
+        if meeting_id in self.active_connections:
+            self.active_connections[meeting_id].remove(websocket)
+            if not self.active_connections[meeting_id]:
+                del self.active_connections[meeting_id]
+        asyncio.create_task(self.broadcast_to_meeting(meeting_id, {
+            "type": "user-left",
+            "user": "Participant"
+        }))
+
+    async def broadcast_to_meeting(self, meeting_id: str, message: dict, exclude: WebSocket = None):
+        if meeting_id in self.active_connections:
+            for connection in self.active_connections[meeting_id]:
+                if connection != exclude:
+                    try:
+                        await connection.send_text(json.dumps(message))
+                    except:
+                        pass
+
+manager = ConnectionManager()
+
+# === FastAPI Setup ===
 load_dotenv()
 
-app = FastAPI(title="Resume Matcher API", version="1.0.0")
+app = FastAPI(title="SimpliCiti Recruitment Platform", version="2.0.0")
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,9 +100,9 @@ app.add_middleware(
 )
 
 evaluator = ResumeEvaluator()
-# email_composer = EmailComposer()
 db = DatabaseManager()
 
+# === Job Data ===
 JOBS = {
     "frontend_dev": {
         "job_id": "frontend_dev",
@@ -40,7 +119,7 @@ JOBS = {
     },
     "backend_dev": {
         "job_id": "backend_dev",
-        "title": "Backend Developer", 
+        "title": "Backend Developer",
         "company": "DataCorp",
         "location": "New York",
         "requirements": {
@@ -66,16 +145,77 @@ JOBS = {
     }
 }
 
-# @app.on_event("startup")
-# async def startup():
-#     for job_data in JOBS.values():
-#         db.save_job(JobPosition(**job_data))
-
+# === UI Routes ===
 @app.get("/")
-async def root():
-    return {"message": "Resume Matcher API", "version": "1.0.0"}
+async def root(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request})
 
-@app.post("/analyze")
+@app.get("/dashboard")
+async def dashboard(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+@app.get("/meetings")
+async def meetings_page(request: Request):
+    return templates.TemplateResponse("meetings.html", {"request": request})
+
+@app.get("/jobs")
+async def jobs_page(request: Request):
+    return templates.TemplateResponse("jobs.html", {"request": request, "jobs": JOBS})
+
+@app.get("/analytics")
+async def analytics_page(request: Request):
+    return templates.TemplateResponse("analytics.html", {"request": request})
+
+# === Meeting API ===
+@app.post("/api/meetings")
+async def create_meeting(meeting_data: dict):
+    meeting_id = str(uuid.uuid4())[:8]
+    meeting = {
+        "id": meeting_id,
+        "title": meeting_data.get("title", "Interview Meeting"),
+        "participant": meeting_data.get("participant", "Candidate"),
+        "created_at": datetime.now().isoformat(),
+        "status": "scheduled"
+    }
+    meetings_db.append(meeting)
+    return meeting
+
+@app.get("/api/meetings")
+async def get_meetings():
+    return meetings_db
+
+@app.get("/api/meetings/{meeting_id}")
+async def get_meeting(meeting_id: str):
+    for meeting in meetings_db:
+        if meeting["id"] == meeting_id:
+            return meeting
+    raise HTTPException(status_code=404, detail="Meeting not found")
+
+# === WebSocket Endpoint ===
+@app.websocket("/ws/{meeting_id}")
+async def websocket_endpoint(websocket: WebSocket, meeting_id: str):
+    await manager.connect(websocket, meeting_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+
+            # Broadcast signaling messages to other participants
+            if message['type'] in ['offer', 'answer', 'ice-candidate']:
+                await manager.broadcast_to_meeting(meeting_id, message, exclude=websocket)
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, meeting_id)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        manager.disconnect(websocket, meeting_id)
+
+# === API Endpoints ===
+@app.get("/api/")
+async def api_root():
+    return {"message": "SimpliCiti Recruitment API", "version": "2.0.0"}
+
+@app.post("/api/analyze")
 async def analyze_resume(
     user_id: str = Form(...),
     job_id: str = Form(...),
@@ -87,9 +227,8 @@ async def analyze_resume(
 
     if job_id not in JOBS:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    try:        
-        # Evaluate resume
+
+    try:
         result = await evaluator.evaluate_resume(
             file_bytes=file_bytes,
             filename=file.filename,
@@ -97,23 +236,10 @@ async def analyze_resume(
             user_id=user_id,
             job_id=job_id
         )
-        
-        # # Generate email
-        # email_data = email_composer.generate_email(
-        #     result, JOBS[job_id], result.extracted_data.get("personal_details", {})
-        # )
-        # result.email_subject = email_data["subject"]
-        # result.email_body = email_data["body"]
-        
-        # Save to database
+
         db.save_resume(user_id, file.filename, result.extracted_data)
         db.save_analysis(result)
-        
-        # # Send email if requested
-        email_sent = False
-        # if send_email and candidate_email:
-            # email_sent = email_composer.send_email(candidate_email, email_data)
-        
+
         return {
             "success": True,
             "user_id": result.user_id,
@@ -136,80 +262,64 @@ async def analyze_resume(
             "email": {
                 "subject": result.email_subject,
                 "body": result.email_body,
-                "sent": email_sent
+                "sent": False
             },
             "extracted_data": result.extracted_data
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/jobs")
+@app.get("/api/jobs")
 async def get_jobs():
-    """Get available job positions"""
     return {"jobs": JOBS}
 
-@app.get("/jobs/{job_id}")
+@app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
-    """Get specific job details"""
     if job_id not in JOBS:
         raise HTTPException(status_code=404, detail="Job not found")
     return JOBS[job_id]
 
-@app.get("/user/{user_id}/history")
+@app.get("/api/user/{user_id}/history")
 async def get_user_history(user_id: str):
-    """Get user's analysis history"""
     history = db.get_user_history(user_id)
     return {"history": history}
 
-@app.get("/user/{user_id}/resumes")
+@app.get("/api/user/{user_id}/resumes")
 async def get_user_resumes(user_id: str):
-    """Get user's uploaded resumes"""
     resumes = db.get_user_resumes(user_id)
     return {"resumes": resumes}
 
-@app.get("/job/{job_id}/analytics")
+@app.get("/api/job/{job_id}/analytics")
 async def get_job_analytics(job_id: str):
-    """Get analytics for a job position"""
     if job_id not in JOBS:
         raise HTTPException(status_code=404, detail="Job not found")
-    
     analytics = db.get_job_analytics(job_id)
     return {
         "job_title": JOBS[job_id]["title"],
         "analytics": analytics
     }
 
-@app.post("/match")
+@app.post("/api/match")
 async def match_existing_resume(user_id: str = Form(...), job_id: str = Form(...)):
-    """Match existing resume to different job"""
-    
     if job_id not in JOBS:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     resumes = db.get_user_resumes(user_id)
     if not resumes:
         raise HTTPException(status_code=404, detail="No resumes found")
-    
+
     latest_resume = resumes[0]
-    
+
     result = await evaluator.evaluate_extracted_data(
         latest_resume["extracted_data"],
         JOBS[job_id]["requirements"],
         user_id,
         job_id
     )
-    
-    # Generate email
-    # email_data = email_composer.generate_email(
-    #     result, JOBS[job_id], result.extracted_data.get("personal_details", {})
-    # )
-    # result.email_subject = email_data["subject"]
-    # result.email_body = email_data["body"]
-    
-    # Save analysis
+
     db.save_analysis(result)
-    
+
     return {
         "success": True,
         "job_title": JOBS[job_id]["title"],
@@ -219,6 +329,7 @@ async def match_existing_resume(user_id: str = Form(...), job_id: str = Form(...
         "suggestions": result.suggestions
     }
 
+# === Entry Point ===
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

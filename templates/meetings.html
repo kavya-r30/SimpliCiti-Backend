@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block page_title %}Meetings{% endblock %}
+
+{% block content %}
+<!-- Browser Compatibility Check -->
+<div id="compatibilityInfo"></div>
+
+<!-- Heading -->
+<div class="mb-6 flex justify-between items-center">
+    <h1 class="text-2xl font-bold text-gray-900">Video Meetings</h1>
+    <button onclick="createMeeting()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+        <i class="fas fa-plus mr-2"></i>New Meeting
+    </button>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Meeting List -->
+    <div class="lg:col-span-1">
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Scheduled Meetings</h3>
+            </div>
+            <div class="p-4 space-y-4" id="meetingList">
+                <!-- Meetings will be loaded here -->
+                <div class="text-center text-gray-500 py-8">
+                    <i class="fas fa-video text-4xl mb-2"></i>
+                    <p>No meetings scheduled</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Call Interface -->
+    <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow">
+            <div class="p-6">
+                <div id="videoContainer" class="bg-gray-900 rounded-lg p-4 min-h-96 flex items-center justify-center">
+                    
+                    <!-- Join Screen -->
+                    <div id="joinScreen" class="text-center">
+                        <i class="fas fa-video text-gray-400 text-6xl mb-4"></i>
+                        <h3 class="text-xl font-semibold text-white mb-2">Join a Meeting</h3>
+                        <p class="text-gray-400 mb-4">Select a meeting from the list or create a new one</p>
+                        <div class="space-y-4">
+                            <input type="text" id="meetingId" placeholder="Enter Meeting ID" 
+                                   class="px-4 py-2 rounded-lg border border-gray-600 bg-gray-800 text-white w-48">
+                            <button onclick="joinMeeting()" 
+                                    class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 ml-2">
+                                Join
+                            </button>
+                        </div>
+                        <div class="mt-4 text-sm text-gray-500">
+                            <p>Try these test IDs: <strong>abc123</strong> or <strong>meet456</strong></p>
+                        </div>
+                    </div>
+
+                    <!-- Video Call Screen -->
+                    <div id="videoCall" class="hidden w-full">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Local Video -->
+                            <div class="bg-black rounded-lg aspect-video relative border-2 border-green-500">
+                                <video id="localVideo" autoplay muted class="w-full h-full rounded-lg object-cover"></video>
+                                <div class="absolute bottom-4 left-4 text-white text-sm bg-green-600 px-2 py-1 rounded">You (Local)</div>
+                                <div class="absolute top-4 left-4">
+                                    <span class="bg-green-500 text-white text-xs px-2 py-1 rounded">LIVE</span>
+                                </div>
+                            </div>
+
+                            <!-- Remote Video -->
+                            <div class="bg-black rounded-lg aspect-video relative border-2 border-blue-500">
+                                <div id="remoteVideo" class="w-full h-full rounded-lg flex items-center justify-center">
+                                    <!-- Remote video will be inserted here -->
+                                </div>
+                                <div class="absolute bottom-4 left-4 text-white text-sm bg-blue-600 px-2 py-1 rounded">Participant (Remote)</div>
+                            </div>
+                        </div>
+
+                        <!-- Controls -->
+                        <div class="flex justify-center space-x-4 mt-6">
+                            <button id="videoToggle" onclick="toggleVideo()" class="bg-green-600 text-white p-3 rounded-full hover:bg-green-700">
+                                <i class="fas fa-video"></i>
+                            </button>
+                            <button id="audioToggle" onclick="toggleAudio()" class="bg-green-600 text-white p-3 rounded-full hover:bg-green-700">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                            <button onclick="leaveMeeting()" class="bg-red-600 text-white p-3 rounded-full hover:bg-red-700">
+                                <i class="fas fa-phone"></i>
+                            </button>
+                        </div>
+
+                        <!-- Meeting Info -->
+                        <div class="mt-4 text-center text-white bg-gray-800 p-3 rounded-lg">
+                            <p>Meeting ID: <strong id="currentMeetingId" class="text-yellow-300">test123</strong></p>
+                            <p class="text-sm text-gray-400">Share this ID with the candidate to connect</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/meetings.js"></script>
+{% endblock %}
