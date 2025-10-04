@@ -3,7 +3,6 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from io import BytesIO
 from typing import Dict
 import google.generativeai as genai
 from PIL import Image
@@ -23,134 +22,6 @@ genai.configure(api_key=GEMINI_API_KEY)
 class ResumeEvaluator:
     def __init__(self):
         self.model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        # Prompts from original code
-        self.extract_prompt = """
-        Extract the key requirements from the following job description.
-
-        Job Description:
-        {job_desc}
-
-        Provide the output in the following JSON format:
-        {{
-          "required_experience_years": integer,
-          "required_education_level": string,
-          "required_skills": [list of strings],
-          "optional_skills": [list of strings],
-          "certifications_preferred": [list of strings],
-          "soft_skills": [list of strings],
-          "keywords_to_match": [list of strings],
-          "location": {{
-            "country": string,
-            "city": string
-          }},
-          "emphasis": {{
-            "technical_skills_weight": integer,
-            "soft_skills_weight": integer,
-            "experience_weight": integer,
-            "education_weight": integer,
-            "language_proficiency_weight": integer,
-            "certifications_weight": integer,
-            "location_weight": integer
-          }}
-        }}
-
-        Only output valid JSON. Strictly no explanation, no comments, no intro.
-        """
-        
-        self.standardize_prompt = """
-        Given the following raw text extracted from a resume, convert it into a unified format following these guidelines:
-
-        Resume Object Model Definition (Markdown):
-        ===
-        # Full legal name as it appears on official documents
-        ## Specific position or role aimed for
-
-        Format: Email / Phone / Country / City
-
-        ## Summary
-        Brief overview of qualifications and career goals
-
-        ## Skills
-        Format: _skill, skill, skill_
-
-        ## Employment History
-        **Company / Job Title / Location**
-        Start - End Date
-        - Responsibility 1
-        - Responsibility 2
-
-        ## Education
-        **Institution / Degree / Location**
-        Start - End Date
-
-        ## Courses (Optional)
-        **Platform / Course Title**
-        Start - End Date
-
-        ## Languages (Optional)
-        **Language / Proficiency**
-
-        ## Links (Optional)
-        - [Title](URL)
-
-        ## Certifications (Optional)
-        List of certifications
-
-        Raw Resume Text:
-        ~~~
-        {resume_text}
-        ~~~
-
-        Structure the resume according to the format. Only include sections present in the original text.
-        Do not invent information. Use telegraphic English with no fluff.
-        Output clean Markdown format only. No intro, no explanations, no comments.
-        """
-        
-        self.scoring_criteria = [
-            {
-                "name": "Technical Skills",
-                "key": "technical_skills", 
-                "description": "Assign points for each required and optional skill, considering proficiency level.",
-                "factors": ["Proficiency in required skills", "Optional skills", "Learning ability"]
-            },
-            {
-                "name": "Experience",
-                "key": "experience",
-                "description": "Assign points based on relevance and quality of experience.",
-                "factors": ["Years of experience", "Role relevance", "Achievements"]
-            },
-            {
-                "name": "Education", 
-                "key": "education",
-                "description": "Assign points based on education level and relevance.",
-                "factors": ["Education level", "Field relevance", "Institution quality"]
-            },
-            {
-                "name": "Soft Skills",
-                "key": "soft_skills",
-                "description": "Assign points for soft skills demonstrated through examples.",
-                "factors": ["Communication", "Leadership", "Problem-solving"]
-            },
-            {
-                "name": "Location Match",
-                "key": "location_match", 
-                "description": "Assign points based on location compatibility.",
-                "factors": ["Geographic proximity", "Remote capability", "Relocation willingness"]
-            },
-            {
-                "name": "Certifications",
-                "key": "certifications",
-                "description": "Assign points for relevant certifications.",
-                "factors": ["Required certifications", "Industry credentials"]
-            },
-            {
-                "name": "Language Proficiency",
-                "key": "language_proficiency",
-                "description": "Assign points for language skills.",
-                "factors": ["Required languages", "Communication ability"]
-            }
-        ]
 
     @staticmethod    
     def save_temp_file(file_bytes: bytes, filename: str) -> str:
@@ -162,192 +33,220 @@ class ResumeEvaluator:
     async def extract_resume_data(self, file_bytes: bytes, filename: str) -> Dict:
         temp_path = self.save_temp_file(file_bytes, filename)
 
-        image = None
-        uploaded_file = None
-
-        if filename.lower().endswith('.pdf'):
-            uploaded_file = genai.upload_file(temp_path)
-        elif filename.lower().endswith(('.png', '.jpeg', '.jpg', '.webp')):
-            image = Image.open(temp_path)
-            uploaded_file = image
-        
-        extraction_prompt = """
-        Extract comprehensive information from this resume and structure it as JSON.
-        
-        Extract:
-        1. Personal Details: name, email, phone, location (city, country)
-        2. Skills: technical skills and soft skills separately
-        3. Work Experience: company, role, duration, location, key responsibilities
-        4. Education: institution, degree, field, graduation year, location
-        5. Certifications: name, issuing organization, date obtained
-        6. Languages: language name and proficiency level
-        7. Projects: project name, description, technologies used
-        8. Awards/Achievements: title, organization, date
-        
-        Return structured JSON:
-        {
-            "personal_details": {
-                "name": "", "email": "", "phone": "", "location": ""
-            },
-            "skills": {
-                "technical": ["", "", ""],
-                "soft": ["", "", ""]
-            },
-            "experience": [
-                {
-                    "company": "",
-                    "role": "", 
-                    "duration": "",
-                    "location": "",
-                    "responsibilities": ["Achievement 1", "Achievement 2"]
-                }
-            ],
-            "education": [
-                {
-                    "institution": "University Name",
-                    "degree": "",
-                    "field": "",
-                    "graduation_year": "",
-                    "location": ""
-                }
-            ],
-            "certifications": [
-                {
-                    "name": "",
-                    "organization": "",
-                    "date": ""
-                }
-            ],
-            "languages": [
-                {
-                    "language": "",
-                    "proficiency": ""
-                }
-            ],
-            "projects": [
-                {
-                    "name": "",
-                    "description": "",
-                    "technologies": ["", "", ""]
-                }
-            ],
-            "awards": [
-                {
-                    "title": "",
-                    "organization": "", 
-                    "date": ""
-                }
-            ]
-        }
-        
-        Only extract information that is clearly present. Do not invent or assume details.
-        """
-        
         try:
-            if image:
-                response = self.model.generate_content([extraction_prompt, uploaded_file])
+            if filename.lower().endswith('.pdf'):
+                uploaded_file = genai.upload_file(temp_path)
+            elif filename.lower().endswith(('.png', '.jpeg', '.jpg', '.webp')):
+                uploaded_file = Image.open(temp_path)
             else:
-                response = self.model.generate_content([extraction_prompt, uploaded_file])
+                raise ValueError(f"Unsupported file format: {filename}")
             
+            extraction_prompt = """
+Extract comprehensive information from this resume and structure it as JSON.
+
+Extract:
+1. Personal Details: name, email, phone, location (city, country)
+2. Skills: technical skills and soft skills separately
+3. Work Experience: company, role, duration, location, key responsibilities
+4. Education: institution, degree, field, graduation year, location
+5. Certifications: name, issuing organization, date obtained
+6. Languages: language name and proficiency level
+7. Projects: project name, description, technologies used, url (if mentioned)
+8. Awards/Achievements: title, organization, date
+9. Social Profiles: Extract only URLs explicitly mentioned in resume
+   - GitHub (github.com)
+   - LinkedIn (linkedin.com)
+   - LeetCode (leetcode.com)
+   - HackerRank (hackerrank.com)
+   - CodeChef (codechef.com)
+   - Codeforces (codeforces.com)
+   - Portfolio/Personal Website
+   - Twitter/X (twitter.com or x.com)
+   - Medium/Blog (medium.com)
+
+Return valid JSON only:
+{
+    "personal_details": {
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "location": "string"
+    },
+    "skills": {
+        "technical": ["skill1", "skill2"],
+        "soft": ["skill1", "skill2"]
+    },
+    "experience": [
+        {
+            "company": "string",
+            "role": "string", 
+            "duration": "string",
+            "location": "string",
+            "responsibilities": ["resp1", "resp2"]
+        }
+    ],
+    "education": [
+        {
+            "institution": "string",
+            "degree": "string",
+            "field": "string",
+            "graduation_year": "string",
+            "location": "string"
+        }
+    ],
+    "certifications": [
+        {
+            "name": "string",
+            "organization": "string",
+            "date": "string"
+        }
+    ],
+    "languages": [
+        {
+            "language": "string",
+            "proficiency": "string"
+        }
+    ],
+    "projects": [
+        {
+            "name": "string",
+            "description": "string",
+            "technologies": ["tech1", "tech2"],
+            "url": "string"
+        }
+    ],
+    "awards": [
+        {
+            "title": "string",
+            "organization": "string", 
+            "date": "string"
+        }
+    ],
+    "social_profiles": {
+        "github": "url_or_null",
+        "linkedin": "url_or_null",
+        "leetcode": "url_or_null",
+        "hackerrank": "url_or_null",
+        "codechef": "url_or_null",
+        "codeforces": "url_or_null",
+        "portfolio": "url_or_null",
+        "twitter": "url_or_null",
+        "medium": "url_or_null"
+    },
+    "summary": "string_or_empty"
+}
+
+IMPORTANT:
+- Only extract information clearly present in the resume
+- Do not invent or assume any details
+- Use null for missing optional fields
+- Ensure all arrays are valid (empty [] if nothing found)
+- Output ONLY valid JSON, no markdown, no explanations
+"""
+            
+            response = self.model.generate_content([extraction_prompt, uploaded_file])
             response_text = response.text.strip()
+
             if response_text.startswith('```json'):
-                response_text = response_text[7:-3]
+                response_text = response_text[7:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
             
             extracted_data = json.loads(response_text)
+            
+            required_keys = ['personal_details', 'skills', 'experience', 'education']
+            for key in required_keys:
+                if key not in extracted_data:
+                    extracted_data[key] = {} if key in ['personal_details', 'skills'] else []
+            
             return extracted_data
             
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed: {e}")
+            return self._get_empty_resume_structure(error=f"Failed to parse response: {str(e)}")
         except Exception as e:
             logger.error(f"Resume data extraction failed: {e}")
-            return {
-                "personal_details": {},
-                "skills": {"technical": [], "soft": []},
-                "experience": [],
-                "education": [],
-                "certifications": [],
-                "languages": [],
-                "projects": [],
-                "awards": [],
-                "error": str(e)
-            }
+            return self._get_empty_resume_structure(error=str(e))
+        finally:
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
     
-
-    async def evaluate_resume(self, file_bytes, filename: str, 
+    async def evaluate_resume(self, file_content: bytes, filename: str, 
                             job_requirements: Dict, user_id: str, job_id: str) -> ResumeAnalysis:
+        """Evaluate resume against job requirements"""
         
-        temp_path = self.save_temp_file(file_bytes, filename)
+        temp_path = self.save_temp_file(file_content, filename)
 
-        image = None
-        uploaded_file = None
-
-        if filename.lower().endswith('.pdf'):
-            uploaded_file = genai.upload_file(temp_path)
-        elif filename.lower().endswith(('.png', '.jpeg', '.jpg', '.webp')):
-            image = Image.open(temp_path)
-            uploaded_file = image
-        
-        analysis_prompt = f"""
-        Analyze this resume comprehensively against the job requirements.
-        
-        Job Requirements:
-        {json.dumps(job_requirements, indent=2)}
-        
-        Analyze from the given document
-        
-        Extract and analyze:
-        1. Personal details (name, email, phone, location)
-        2. Technical skills with proficiency indicators
-        3. Work experience with achievements
-        4. Education with grades/honors if mentioned
-        5. Certifications and credentials
-        6. Languages with proficiency levels
-        7. Soft skills evidence from descriptions
-        
-        Then provide individual scoring for each criterion (0-100):
-        - Technical Skills: Match with required skills
-        - Experience: Relevance and quality of work history
-        - Education: Educational background alignment
-        - Soft Skills: Communication and leadership evidence
-        - Location Match: Geographic/remote compatibility
-        - Certifications: Professional credentials
-        - Language Proficiency: Communication capabilities
-        
-        Do not invent information. No intro, no explanations, no comments. 
-        Return detailed JSON with reasoning for each score.
-        
-        JSON Format:
-        {{
-            "personal_details": {{"name": "", "email": "", "phone": "", "location": ""}},
-            "skills": {{"technical": [], "soft": []}},
-            "experience": [{{}}],
-            "education": [{{}}],
-            "certifications": [],
-            "languages": [],
-            "individual_scoring": {{
-                "technical_skills": {{"score": 85, "reasoning": "Strong match in React, JavaScript...", "red_flags": []}},
-                "experience": {{"score": 70, "reasoning": "Good experience but...", "red_flags": []}},
-                "education": {{"score": 80, "reasoning": "", "red_flags": []}},
-                "soft_skills": {{"score": 75, "reasoning": "", "red_flags": []}},
-                "location_match": {{"score": 90, "reasoning": "", "red_flags": []}},
-                "certifications": {{"score": 60, "reasoning": "", "red_flags": []}},
-                "language_proficiency": {{"score": 85, "reasoning": "", "red_flags": []}}
-            }},
-            "overall_assessment": {{
-                "match_reasons": ["reason1", "reason2", "reason3"],
-                "suggestions": ["suggestion1", "suggestion2", "suggestion3"],
-                "overall_impression": "Strong candidate with..."
-            }}
-        }}
-        """
-        
         try:
-            if image:
-                response = self.model.generate_content([analysis_prompt, uploaded_file])
+            if filename.lower().endswith('.pdf'):
+                uploaded_file = genai.upload_file(temp_path)
+            elif filename.lower().endswith(('.png', '.jpeg', '.jpg', '.webp')):
+                uploaded_file = Image.open(temp_path)
             else:
-                response = self.model.generate_content([analysis_prompt, uploaded_file])
+                raise ValueError(f"Unsupported file format: {filename}")
             
+            analysis_prompt = f"""
+Analyze this resume comprehensively against the job requirements.
+
+Job Requirements:
+{json.dumps(job_requirements, indent=2)}
+
+Provide detailed scoring for each criterion (0-100 scale):
+
+1. **Technical Skills**: Match with required technical skills
+2. **Experience**: Relevance and quality of work experience
+3. **Education**: Educational background alignment
+4. **Soft Skills**: Communication, leadership, teamwork evidence
+5. **Projects**: Quality and relevance of projects
+6. **Location Match**: Geographic/remote work compatibility
+7. **Certifications**: Professional credentials and certificates
+8. **Language Proficiency**: Required language skills
+
+For each score, provide:
+- Numeric score (0-100)
+- Reasoning explaining the score
+- Red flags if any (empty array if none)
+
+Return valid JSON only:
+{{
+    "personal_details": {{"name": "", "email": "", "phone": "", "location": ""}},
+    "skills": {{"technical": [], "soft": []}},
+    "experience": [{{}}],
+    "education": [{{}}],
+    "certifications": [],
+    "languages": [],
+    "projects": [],
+    "individual_scoring": {{
+        "technical_skills": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "experience": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "education": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "soft_skills": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "projects": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "location_match": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "certifications": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "language_proficiency": {{"score": 0, "reasoning": "", "red_flags": []}}
+    }},
+    "overall_assessment": {{
+        "match_reasons": ["reason1", "reason2", "reason3"],
+        "suggestions": ["suggestion1", "suggestion2", "suggestion3"],
+        "overall_impression": "Brief summary"
+    }}
+}}
+
+Output ONLY valid JSON without inventing any information, no markdown, no explanations.
+"""
+            
+            response = self.model.generate_content([analysis_prompt, uploaded_file])
             response_text = response.text.strip()
+            
             if response_text.startswith('```json'):
-                response_text = response_text[7:-3]
+                response_text = response_text[7:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
             
             analysis_data = json.loads(response_text)
             
@@ -357,13 +256,27 @@ class ResumeEvaluator:
             total_score = 0
             total_weight = 0
             all_red_flags = []
-            
             scores = {}
-            for criterion_key, criterion_data in individual_scores.items():
+            
+            score_keys = [
+                "technical_skills",
+                "experience", 
+                "education",
+                "soft_skills",
+                "projects",
+                "location_match",
+                "certifications",
+                "language_proficiency"
+            ]
+            
+            for key in score_keys:
+                criterion_data = individual_scores.get(key, {"score": 0, "reasoning": "", "red_flags": []})
                 score = criterion_data.get("score", 0)
-                weight = weights.get(criterion_key.replace("_", ""), weights.get(criterion_key, 10))
                 
-                scores[criterion_key] = score
+                weight_key = key.replace("_", "") if "_" in key else key
+                weight = weights.get(key, weights.get(weight_key, 10))
+                
+                scores[key] = score
                 total_score += score * weight
                 total_weight += weight
                 
@@ -371,8 +284,7 @@ class ResumeEvaluator:
                 all_red_flags.extend(red_flags)
             
             overall_score = int(total_score / total_weight) if total_weight > 0 else 0
-            
-            performance_tier, _ = get_performance_tier(overall_score)
+            performance_tier = get_performance_tier(overall_score)
             
             result = ResumeAnalysis(
                 user_id=user_id,
@@ -383,6 +295,7 @@ class ResumeEvaluator:
                 experience=scores.get("experience", 0),
                 education=scores.get("education", 0),
                 soft_skills=scores.get("soft_skills", 0),
+                projects=scores.get("projects", 0),
                 location_match=scores.get("location_match", 0),
                 certifications=scores.get("certifications", 0),
                 language_proficiency=scores.get("language_proficiency", 0),
@@ -394,79 +307,119 @@ class ResumeEvaluator:
             
             return result
             
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed during evaluation: {e}")
+            return self._get_failed_analysis(user_id, job_id, f"Failed to parse AI response: {str(e)}")
         except Exception as e:
             logger.error(f"Resume evaluation failed: {e}")
-            return ResumeAnalysis(
-                user_id=user_id,
-                job_id=job_id,
-                overall_score=0,
-                performance_tier="Poor",
-                technical_skills=0,
-                experience=0,
-                education=0,
-                soft_skills=0,
-                location_match=0,
-                certifications=0,
-                language_proficiency=0,
-                match_reasons="Analysis failed",
-                suggestions=["Please try uploading again"],
-                red_flags=["Evaluation error"],
-                extracted_data={"error": str(e)}
-            )
+            return self._get_failed_analysis(user_id, job_id, str(e))
+        finally:
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
     
     async def evaluate_extracted_data(self, extracted_data: Dict, job_requirements: Dict, 
                                     user_id: str, job_id: str) -> ResumeAnalysis:
+      
         scoring_prompt = f"""
-        Re-score this candidate against new job requirements:
-        
-        Previous Analysis:
-        {json.dumps(extracted_data, indent=2)}
-        
-        New Job Requirements:
-        {json.dumps(job_requirements, indent=2)}
-        
-        Provide updated individual scores (0-100) in JSON format:
-        {{
-            "individual_scoring": {{
-                "technical_skills": {{"score": 85}},
-                "experience": {{"score": 70}},
-                "education": {{"score": 80}},
-                "soft_skills": {{"score": 75}},
-                "location_match": {{"score": 90}},
-                "certifications": {{"score": 60}},
-                "language_proficiency": {{"score": 85}}
-            }},
-            "match_reasons": ["reason1", "reason2"],
-            "suggestions": ["suggestion1", "suggestion2"]
-        }}
-        """
+Re-score this candidate's profile against the job requirements.
+
+Candidate Profile:
+{json.dumps(extracted_data, indent=2)}
+
+Job Requirements:
+{json.dumps(job_requirements, indent=2)}
+
+Provide detailed scoring for each criterion (0-100 scale):
+
+1. **Technical Skills**: Match with required technical skills
+2. **Experience**: Relevance and quality of work experience
+3. **Education**: Educational background alignment
+4. **Soft Skills**: Communication, leadership, teamwork evidence
+5. **Projects**: Quality and relevance of projects
+6. **Location Match**: Geographic/remote work compatibility
+7. **Certifications**: Professional credentials and certificates
+8. **Language Proficiency**: Required language skills
+
+For each score, provide:
+- Numeric score (0-100)
+- Reasoning explaining the score
+- Red flags if any (empty array if none)
+
+Return valid JSON only:
+{{
+    "personal_details": {{"name": "", "email": "", "phone": "", "location": ""}},
+    "skills": {{"technical": [], "soft": []}},
+    "experience": [{{}}],
+    "education": [{{}}],
+    "certifications": [],
+    "languages": [],
+    "projects": [],
+    "individual_scoring": {{
+        "technical_skills": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "experience": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "education": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "soft_skills": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "projects": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "location_match": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "certifications": {{"score": 0, "reasoning": "", "red_flags": []}},
+        "language_proficiency": {{"score": 0, "reasoning": "", "red_flags": []}}
+    }},
+    "overall_assessment": {{
+        "match_reasons": ["reason1", "reason2", "reason3"],
+        "suggestions": ["suggestion1", "suggestion2", "suggestion3"],
+        "overall_impression": "Brief summary"
+    }}
+}}
+
+Output ONLY valid JSON without inventing any information, no markdown, no explanations.
+"""
         
         try:
             response = self.model.generate_content(scoring_prompt)
             response_text = response.text.strip()
-            if response_text.startswith('```json'):
-                response_text = response_text[7:-3]
             
+            if response_text.startswith('```json'):
+                response_text = response_text[7:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+
             new_analysis = json.loads(response_text)
             
             individual_scores = new_analysis.get("individual_scoring", {})
             weights = job_requirements.get("weights", {})
-            
+
             total_score = 0
             total_weight = 0
-            
+            all_red_flags = []
             scores = {}
-            for criterion_key, criterion_data in individual_scores.items():
+
+            score_keys = [
+                "technical_skills", "experience", "education", "soft_skills",
+                "projects", "location_match", "certifications", "language_proficiency"
+            ]
+
+            for key in score_keys:
+                criterion_data = individual_scores.get(key, {"score": 0, "reasoning": "", "red_flags": []})
                 score = criterion_data.get("score", 0)
-                weight = weights.get(criterion_key.replace("_", ""), weights.get(criterion_key, 10))
-                
-                scores[criterion_key] = score
+
+                weight_key = key.replace("_", "") if "_" in key else key
+                weight = weights.get(key, weights.get(weight_key, 10))
+
+                scores[key] = score
                 total_score += score * weight
                 total_weight += weight
-            
+
+                red_flags = criterion_data.get("red_flags", [])
+                all_red_flags.extend(red_flags)
+
             overall_score = int(total_score / total_weight) if total_weight > 0 else 0
-            performance_tier, _ = get_performance_tier(overall_score)
-            
+            performance_tier = get_performance_tier(overall_score)
+
+            assessment = new_analysis.get("overall_assessment", {})
+
             return ResumeAnalysis(
                 user_id=user_id,
                 job_id=job_id,
@@ -476,31 +429,55 @@ class ResumeEvaluator:
                 experience=scores.get("experience", 0),
                 education=scores.get("education", 0),
                 soft_skills=scores.get("soft_skills", 0),
+                projects=scores.get("projects", 0),
                 location_match=scores.get("location_match", 0),
                 certifications=scores.get("certifications", 0),
                 language_proficiency=scores.get("language_proficiency", 0),
-                match_reasons=" | ".join(new_analysis.get("match_reasons", [])),
-                suggestions=new_analysis.get("suggestions", []),
-                red_flags=[],
-                extracted_data=extracted_data
+                match_reasons=" | ".join(assessment.get("match_reasons", [])),
+                suggestions=assessment.get("suggestions", []),
+                red_flags=all_red_flags,
+                extracted_data=new_analysis
             )
             
         except Exception as e:
             logger.error(f"Re-evaluation failed: {e}")
-            return ResumeAnalysis(
-                user_id=user_id,
-                job_id=job_id,
-                overall_score=50,
-                performance_tier="Moderate",
-                technical_skills=50,
-                experience=50,
-                education=50,
-                soft_skills=50,
-                location_match=50,
-                certifications=50,
-                language_proficiency=50,
-                match_reasons="Re-analysis with existing data",
-                suggestions=["Consider updating resume for this role"],
-                red_flags=[],
-                extracted_data=extracted_data
-            )
+            return self._get_failed_analysis(user_id, job_id, f"Re-evaluation error: {str(e)}")
+    
+    @staticmethod
+    def _get_empty_resume_structure(error: str = "") -> Dict:
+        """Return empty resume structure for failed extractions"""
+        return {
+            "personal_details": {},
+            "skills": {"technical": [], "soft": []},
+            "experience": [],
+            "education": [],
+            "certifications": [],
+            "languages": [],
+            "projects": [],
+            "awards": [],
+            "social_profiles": {},
+            "summary": "",
+            "error": error
+        }
+    
+    @staticmethod
+    def _get_failed_analysis(user_id: str, job_id: str, error: str) -> ResumeAnalysis:
+        """Return failed analysis with error details"""
+        return ResumeAnalysis(
+            user_id=user_id,
+            job_id=job_id,
+            overall_score=0,
+            performance_tier="Poor",
+            technical_skills=0,
+            experience=0,
+            education=0,
+            soft_skills=0,
+            projects=0,
+            location_match=0,
+            certifications=0,
+            language_proficiency=0,
+            match_reasons="Analysis failed",
+            suggestions=["Please try uploading the resume again"],
+            red_flags=[f"Evaluation error: {error}"],
+            extracted_data={"error": error}
+        )
