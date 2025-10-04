@@ -3,6 +3,8 @@ from typing import Optional
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from google_meet_interaction import router as google_meet_router
+from starlette.middleware.sessions import SessionMiddleware
 
 from evaluator import ResumeEvaluator
 from email_composer import EmailComposer
@@ -10,6 +12,7 @@ from storage import DatabaseManager
 from models import JobPosition
 
 load_dotenv()
+
 
 app = FastAPI(title="Resume Evaluation API", version="2.0")
 
@@ -20,6 +23,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("FLASK_SECRET_KEY", "dev_secret"))
+
+app.include_router(google_meet_router, prefix="/google", tags=["Google Meet"])
 
 evaluator = ResumeEvaluator()
 email_composer = EmailComposer()
