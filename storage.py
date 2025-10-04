@@ -71,10 +71,8 @@ class DatabaseManager:
             result = db_query.limit(limit).execute()
             users = result.data or []
             
-            # Post-process for skill filtering and score filtering
             filtered = []
             for user in users:
-                # Calculate avg score
                 if user.get('applications'):
                     scores = [app['overall_score'] for app in user['applications'] if app.get('overall_score')]
                     avg_score = sum(scores) / len(scores) if scores else 0
@@ -84,11 +82,9 @@ class DatabaseManager:
                     user['avg_score'] = 0
                     user['total_applications'] = 0
                 
-                # Apply min_score filter
                 if min_score and user['avg_score'] < min_score:
                     continue
                 
-                # Clean up
                 del user['applications']
                 filtered.append(user)
             
@@ -348,19 +344,16 @@ class DatabaseManager:
             scores = [app['overall_score'] for app in applications]
             avg_score = sum(scores) / len(scores)
             
-            # Performance tier distribution
             tier_counts = {}
             for app in applications:
                 tier = app['performance_tier']
                 tier_counts[tier] = tier_counts.get(tier, 0) + 1
             
-            # Status distribution
             status_counts = {}
             for app in applications:
                 status = app['status']
                 status_counts[status] = status_counts.get(status, 0) + 1
             
-            # Top candidates
             top = sorted(applications, key=lambda x: x['overall_score'], reverse=True)[:10]
             top_candidates = [
                 {
@@ -386,7 +379,6 @@ class DatabaseManager:
     def get_platform_stats(self) -> Dict:
         """Get overall platform statistics"""
         try:
-            # Get counts
             users_result = self.client.table('users').select('user_id', count='exact').execute()
             apps_result = self.client.table('applications').select('*').execute()
             

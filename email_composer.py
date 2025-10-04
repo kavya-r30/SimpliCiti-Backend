@@ -72,7 +72,6 @@ Hiring Team
         score = analysis.overall_score
         candidate_name = candidate_data.get("name", "Candidate")
         
-        # Determine email type
         if score >= 85 and analysis.performance_tier in ["Exceptional", "Strong"]:
             template_key = "acceptance"
         elif score >= 60:
@@ -80,12 +79,10 @@ Hiring Team
         else:
             template_key = "rejection"
         
-        # Extract strengths and gaps
         strengths = self._get_strengths(analysis)
         suggestions = self._format_suggestions(analysis.suggestions)
         gaps = self._get_gaps(analysis)
         
-        # Format email
         template = self.templates[template_key]
         
         subject = template["subject"].format(

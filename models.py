@@ -3,7 +3,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 class JobPosition(BaseModel):
-    """Job position model"""
     job_id: str
     title: str
     company: str
@@ -12,17 +11,14 @@ class JobPosition(BaseModel):
     requirements: Dict[str, Any]
 
 class ResumeAnalysis(BaseModel):
-    """Resume analysis result"""
     id: Optional[str] = None
     user_id: str
     job_id: str
     
-    # Overall scoring
     overall_score: int = Field(ge=0, le=100)
     performance_tier: str
     application_status: str = "pending"
     
-    # Individual scores (8 fields - must match evaluator and database)
     technical_skills: int = Field(ge=0, le=100)
     experience: int = Field(ge=0, le=100)
     education: int = Field(ge=0, le=100)
@@ -32,31 +28,28 @@ class ResumeAnalysis(BaseModel):
     certifications: int = Field(ge=0, le=100)
     language_proficiency: int = Field(ge=0, le=100)
     
-    # Analysis details
     match_reasons: str
     suggestions: List[str] = []
     red_flags: List[str] = []
     extracted_data: Dict[str, Any] = {}
     
-    # Email
     email_subject: Optional[str] = None
     email_body: Optional[str] = None
     
-    # Metadata
     recruiter_notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
 APPLICATION_STATUSES = [
-    "pending",      # Initial submission
-    "selected",     # Score >= 90, top tier
-    "shortlisted",  # Score 80-89, strong candidates
-    "waitlisted",   # Score 70-79, backup
-    "rejected",     # Score < 70
-    "interviewed",  # Moved to interview
-    "offered",      # Job offer extended
-    "accepted",     # Offer accepted
-    "withdrawn"     # Candidate withdrew
+    "pending",      
+    "selected",      
+    "shortlisted",   
+    "waitlisted",   
+    "rejected",      
+    "interviewed",   
+    "offered",       
+    "accepted",     
+    "withdrawn"     
 ]
 
 PERFORMANCE_TIERS = [
