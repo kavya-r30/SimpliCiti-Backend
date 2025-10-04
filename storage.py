@@ -275,6 +275,65 @@ class DatabaseManager:
             logger.error(f"Failed to get user applications: {e}")
             return []
     
+    def get_all_applications(self, status: str = None, job_id: str = None,
+                            min_score: int = None, max_score: int = None,
+                            performance_tier: str = None,
+                            sort_by: str = 'created_at', order: str = 'desc',
+                            limit: int = 50, offset: int = 0) -> List[Dict]:
+        """Get all applications with filters and pagination"""
+        try:
+            query = self.client.table('applications').select('*')
+            
+            if status:
+                query = query.eq('status', status)
+            
+            if job_id:
+                query = query.eq('job_id', job_id)
+            
+            if min_score is not None:
+                query = query.gte('overall_score', min_score)
+            
+            if max_score is not None:
+                query = query.lte('overall_score', max_score)
+            
+            if performance_tier:
+                query = query.eq('performance_tier', performance_tier)
+            
+            desc = order == 'desc'
+            result = query.order(sort_by, desc=desc).range(offset, offset + limit - 1).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get all applications: {e}")
+            return []
+    
+    def get_applications_count(self, status: str = None, job_id: str = None,
+                              min_score: int = None, max_score: int = None,
+                              performance_tier: str = None) -> int:
+        """Get total count of applications matching filters"""
+        try:
+            query = self.client.table('applications').select('id', count='exact')
+            
+            if status:
+                query = query.eq('status', status)
+            
+            if job_id:
+                query = query.eq('job_id', job_id)
+            
+            if min_score is not None:
+                query = query.gte('overall_score', min_score)
+            
+            if max_score is not None:
+                query = query.lte('overall_score', max_score)
+            
+            if performance_tier:
+                query = query.eq('performance_tier', performance_tier)
+            
+            result = query.execute()
+            return result.count or 0
+        except Exception as e:
+            logger.error(f"Failed to get applications count: {e}")
+            return 0
+    
     def get_job_applicants(self, job_id: str, status: str = None, 
                           sort_by: str = 'overall_score', order: str = 'desc',
                           limit: int = 50) -> List[Dict]:

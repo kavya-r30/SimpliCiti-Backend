@@ -348,6 +348,76 @@ async def get_job_analytics(job_id: str):
 # APPLICATION ROUTES
 # ============================================================================
 
+@app.get("/applications", tags=["Applications"])
+async def list_all_applications(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    job_id: Optional[str] = Query(None, description="Filter by job"),
+    min_score: Optional[int] = Query(None, description="Minimum score"),
+    max_score: Optional[int] = Query(None, description="Maximum score"),
+    performance_tier: Optional[str] = Query(None, description="Filter by tier: Exceptional, Strong, Moderate, Weak, Poor"),
+    sort_by: str = Query("created_at", description="Sort by field"),
+    order: str = Query("desc", description="asc or desc"),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0)
+):
+    """
+    Get all applications with filtering, sorting, and pagination
+    """
+    try:
+        applications = db.get_all_applications(
+            status=status,
+            job_id=job_id,
+            min_score=min_score,
+            max_score=max_score,
+            performance_tier=performance_tier,
+            sort_by=sort_by,
+            order=order,
+            limit=limit,
+            offset=offset
+        )
+        
+        for app in applications:
+            user = db.get_user_profile(app['user_id'])
+            if user:
+                app['candidate_name'] = user.get('name')
+                app['candidate_email'] = user.get('email')
+                app['candidate_location'] = user.get('location')
+                app['github_url'] = user.get('github_url')
+                app['linkedin_url'] = user.get('linkedin_url')
+            
+            job = db.get_job_by_id(app['job_id'])
+            if job:
+                app['job_title'] = job['title']
+                app['company'] = job['company']
+                app['job_location'] = job['location']
+        
+        total = db.get_applications_count(
+            status=status,
+            job_id=job_id,
+            min_score=min_score,
+            max_score=max_score,
+            performance_tier=performance_tier
+        )
+        
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + len(applications)) < total,
+            "applications": applications,
+            "filters": {
+                "status": status,
+                "job_id": job_id,
+                "min_score": min_score,
+                "max_score": max_score,
+                "performance_tier": performance_tier,
+                "sort_by": sort_by,
+                "order": order
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/applications/submit", tags=["Applications"])
 async def submit_application(
     user_id: str = Form(...),
