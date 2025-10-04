@@ -43,7 +43,6 @@ async def upload_resume(
     user_id: str = Form(...),
     file: UploadFile = File(...)
 ):
-    """Upload resume and extract data"""
     try:
         file_content = await file.read()
         extracted_data = await evaluator.extract_resume_data(file_content, file.filename)
@@ -376,32 +375,35 @@ async def submit_application(
             )
         
         if file:
-            file_content = await file.read()
+            upload_response = await upload_resume(user_id=user_id, file=file)
+            saved_resume_id = upload_response["resume_id"]
             
-            # Evaluate resume
-            analysis = await evaluator.evaluate_resume(
-                file_content=file_content,
-                filename=file.filename,
+            resume = db.get_resume_by_id(saved_resume_id)
+            if not resume:
+                raise HTTPException(status_code=404, detail="Resume not found")
+            
+            if resume['user_id'] != user_id:
+                raise HTTPException(status_code=403, detail="Resume does not belong to this user")
+            
+            extracted_data = resume['extracted_data']
+            analysis = await evaluator.evaluate_extracted_data(
+                extracted_data=extracted_data,
                 job_requirements=job["requirements"],
                 user_id=user_id,
                 job_id=job_id
             )
             
-            # Save new resume
-            saved_resume_id = db.save_resume(user_id, file.filename, analysis.extracted_data)
-            personal_details = analysis.extracted_data.get("personal_details", {})
+            saved_resume_id = resume_id
+            personal_details = extracted_data.get("personal_details", {})
         
         elif resume_id:
-            # Get existing resume
             resume = db.get_resume_by_id(resume_id)
             if not resume:
                 raise HTTPException(status_code=404, detail="Resume not found")
             
-            # Verify resume belongs to user
             if resume['user_id'] != user_id:
                 raise HTTPException(status_code=403, detail="Resume does not belong to this user")
             
-            # Re-evaluate against this job
             extracted_data = resume['extracted_data']
             analysis = await evaluator.evaluate_extracted_data(
                 extracted_data=extracted_data,
@@ -421,7 +423,6 @@ async def submit_application(
                     detail="No resume found. Please upload a resume or provide resume_id"
                 )
             
-            # Use latest resume
             latest_resume = resumes[0]
             extracted_data = latest_resume['extracted_data']
             
