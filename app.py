@@ -132,6 +132,25 @@ async def get_user_resumes(user_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/users/{resume_id}", tags=["Users"])
+async def get_resume_by_id(resume_id: str):
+    """Get specific resume by ID"""
+    try:
+        resume = db.get_resume_by_id(resume_id)
+        if not resume:
+            raise HTTPException(status_code=404, detail="Resume not found")
+        
+        user = db.get_user_profile(resume['user_id'])
+        if user:
+            resume['user_name'] = user.get('name')
+            resume['user_email'] = user.get('email')
+        
+        return resume
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/users/search", tags=["Users"])
 async def search_users(
     q: Optional[str] = Query(None, description="Search query"),
