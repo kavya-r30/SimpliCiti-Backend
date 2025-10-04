@@ -31,8 +31,7 @@ db = DatabaseManager()
 
 @app.get("/health", tags=["System"])
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "version": "2.0"}
+    return {"status": "healthy"}
 
 # ============================================================================
 # USER ROUTES
@@ -47,7 +46,6 @@ async def upload_resume(
         file_content = await file.read()
         extracted_data = await evaluator.extract_resume_data(file_content, file.filename)
         
-        # Save/update user profile
         personal = extracted_data.get("personal_details", {})
         social = extracted_data.get("social_profiles", {})
         
@@ -63,7 +61,6 @@ async def upload_resume(
             portfolio_url=social.get("portfolio")
         )
         
-        # Save resume
         resume_id = db.save_resume(user_id, file.filename, extracted_data)
         
         return {
@@ -112,7 +109,6 @@ async def get_user_applications(
     try:
         applications = db.get_user_applications(user_id, status, sort_by, order)
         
-        # Enrich with job details
         for app in applications:
             job = db.get_job_by_id(app['job_id'])
             if job:
@@ -308,7 +304,6 @@ async def get_job_applicants(
         
         applicants = db.get_job_applicants(job_id, status, sort_by, order, limit)
         
-        # Enrich with user details
         for app in applicants:
             user = db.get_user_profile(app['user_id'])
             if user:
@@ -436,19 +431,15 @@ async def submit_application(
             saved_resume_id = latest_resume['id']
             personal_details = extracted_data.get("personal_details", {})
         
-        # Generate email
         email_data = email_composer.generate_email(analysis, job, personal_details)
         analysis.email_subject = email_data["subject"]
         analysis.email_body = email_data["body"]
         
-        # Determine status
         status = db.determine_application_status(analysis.overall_score, analysis.performance_tier)
         analysis.application_status = status
         
-        # Save application
         application_id = db.save_application(analysis, saved_resume_id)
         
-        # Send email if requested
         email_sent = False
         if send_email and candidate_email:
             email_sent = email_composer.send_email(candidate_email, email_data)
@@ -495,10 +486,8 @@ async def submit_multiple_applications(
         file_content = await file.read()
         job_id_list = [j.strip() for j in job_ids.split(',')]
         
-        # Extract resume data once
         extracted_data = await evaluator.extract_resume_data(file_content, file.filename)
         
-        # Save resume once
         resume_id = db.save_resume(user_id, file.filename, extracted_data)
         
         results = []
@@ -508,7 +497,6 @@ async def submit_multiple_applications(
                 results.append({"job_id": job_id, "error": "Job not found"})
                 continue
             
-            # Evaluate against this job
             analysis = await evaluator.evaluate_extracted_data(
                 extracted_data=extracted_data,
                 job_requirements=job["requirements"],
@@ -516,11 +504,9 @@ async def submit_multiple_applications(
                 job_id=job_id
             )
             
-            # Determine status
             status = db.determine_application_status(analysis.overall_score, analysis.performance_tier)
             analysis.application_status = status
             
-            # Save application
             application_id = db.save_application(analysis, resume_id)
             
             results.append({
@@ -552,13 +538,11 @@ async def get_application(application_id: str):
         if not application:
             raise HTTPException(status_code=404, detail="Application not found")
         
-        # Enrich with job data
         job = db.get_job_by_id(application['job_id'])
         if job:
             application['job_title'] = job['title']
             application['company'] = job['company']
         
-        # Enrich with user data
         user = db.get_user_profile(application['user_id'])
         if user:
             application['candidate_name'] = user.get('name')
