@@ -487,3 +487,99 @@ class DatabaseManager:
             return "waitlisted"
         else:
             return "rejected"
+
+    # ============================================================================
+    # MEETING METHODS
+    # ============================================================================
+
+    def create_interview_meeting(self, application_id: str, user_id: str, 
+                                job_id: str, recruiter_id: str, 
+                                scheduled_time: str, duration_minutes: int = 60) -> Optional[str]:
+        """Create a new interview meeting"""
+        try:
+            import uuid
+            room_name = f"interview_{uuid.uuid4().hex[:12]}"
+            
+            result = self.client.table('meetings').insert({
+                'application_id': application_id,
+                'user_id': user_id,
+                'job_id': job_id,
+                'recruiter_id': recruiter_id,
+                'room_name': room_name,
+                'scheduled_time': scheduled_time,
+                'duration_minutes': duration_minutes,
+                'status': 'scheduled'
+            }).execute()
+            
+            return result.data[0]['id'] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to create meeting: {e}")
+            return None
+
+    def get_meeting_by_id(self, meeting_id: str) -> Optional[Dict]:
+        """Get meeting by ID"""
+        try:
+            result = self.client.table('meetings').select('*').eq('id', meeting_id).single().execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Failed to get meeting: {e}")
+            return None
+
+    def get_meeting_by_application(self, application_id: str) -> Optional[Dict]:
+        """Get meeting by application ID"""
+        try:
+            result = self.client.table('meetings').select('*').eq('application_id', application_id).order('created_at', desc=True).limit(1).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Failed to get meeting by application: {e}")
+            return None
+
+    def get_user_meetings(self, user_id: str, status: str = None) -> List[Dict]:
+        """Get all meetings for a user"""
+        try:
+            query = self.client.table('meetings').select('*').eq('user_id', user_id)
+            
+            if status:
+                query = query.eq('status', status)
+            
+            result = query.order('scheduled_time', desc=False).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get user meetings: {e}")
+            return []
+
+    def get_recruiter_meetings(self, recruiter_id: str, status: str = None) -> List[Dict]:
+        """Get all meetings for a recruiter"""
+        try:
+            query = self.client.table('meetings').select('*').eq('recruiter_id', recruiter_id)
+            
+            if status:
+                query = query.eq('status', status)
+            
+            result = query.order('scheduled_time', desc=False).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to get recruiter meetings: {e}")
+            return []
+
+    def update_meeting_status(self, meeting_id: str, status: str, notes: str = None) -> bool:
+        """Update meeting status"""
+        try:
+            update_data = {'status': status}
+            if notes:
+                update_data['meeting_notes'] = notes
+            
+            result = self.client.table('meetings').update(update_data).eq('id', meeting_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Failed to update meeting status: {e}")
+            return False
+
+    def delete_meeting(self, meeting_id: str) -> bool:
+        """Delete a meeting"""
+        try:
+            result = self.client.table('meetings').delete().eq('id', meeting_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Failed to delete meeting: {e}")
+            return False

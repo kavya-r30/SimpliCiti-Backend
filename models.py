@@ -40,6 +40,20 @@ class ResumeAnalysis(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+class InterviewMeeting(BaseModel):
+    meeting_id: Optional[str] = None
+    application_id: str
+    user_id: str
+    job_id: str
+    recruiter_id: str
+    room_name: str
+    scheduled_time: datetime
+    duration_minutes: int = 60
+    status: str = "scheduled"
+    meeting_notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
 APPLICATION_STATUSES = [
     "pending",      
     "selected",      
@@ -60,6 +74,13 @@ PERFORMANCE_TIERS = [
     {"min": 0, "tier": "Poor"}
 ]
 
+MEETING_STATUSES = [
+    "scheduled",
+    "ongoing",
+    "completed",
+    "cancelled",
+    "no_show"
+]
 
 def get_performance_tier(score: int) -> tuple[str, str]:
     for tier_info in PERFORMANCE_TIERS:
@@ -69,3 +90,6 @@ def get_performance_tier(score: int) -> tuple[str, str]:
 
 def validate_status(status: str) -> bool:
     return status in APPLICATION_STATUSES
+
+def validate_meeting_status(status: str) -> bool:
+    return status in MEETING_STATUSES

@@ -673,6 +673,285 @@ async def update_application_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
+# MEETING ROUTES (Interview Video Conferencing)
+# ============================================================================
+
+@app.post("/meetings/create", tags=["Meetings"])
+async def create_meeting(
+    application_id: str = Form(...),
+    recruiter_id: str = Form(...),
+    scheduled_time: str = Form(...),  # ISO format: "2025-10-10T14:30:00"
+    duration_minutes: int = Form(60)
+):
+    """
+    Create a new interview meeting for an application.
+    Returns meeting details with room_name for Jitsi integration.
+    """
+    try:
+        # Get application details
+        application = db.get_application_by_id(application_id)
+        if not application:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        user_id = application['user_id']
+        job_id = application['job_id']
+        
+        # Check if meeting already exists for this application
+        existing_meeting = db.get_meeting_by_application(application_id)
+        if existing_meeting and existing_meeting['status'] in ['scheduled', 'ongoing']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Active meeting already exists: {existing_meeting['id']}"
+            )
+        
+        # Create meeting
+        meeting_id = db.create_interview_meeting(
+            application_id=application_id,
+            user_id=user_id,
+            job_id=job_id,
+            recruiter_id=recruiter_id,
+            scheduled_time=scheduled_time,
+            duration_minutes=duration_minutes
+        )
+        
+        if not meeting_id:
+            raise HTTPException(status_code=500, detail="Failed to create meeting")
+        
+        meeting = db.get_meeting_by_id(meeting_id)
+        
+        # Get participant details
+        user = db.get_user_profile(user_id)
+        job = db.get_job_by_id(job_id)
+        
+        return {
+            "success": True,
+            "meeting_id": meeting_id,
+            "room_name": meeting['room_name'],
+            "scheduled_time": meeting['scheduled_time'],
+            "duration_minutes": meeting['duration_minutes'],
+            "status": meeting['status'],
+            "candidate": {
+                "user_id": user_id,
+                "name": user.get('name') if user else None,
+                "email": user.get('email') if user else None
+            },
+            "job": {
+                "job_id": job_id,
+                "title": job['title'] if job else None,
+                "company": job['company'] if job else None
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/meetings/{meeting_id}", tags=["Meetings"])
+async def get_meeting(meeting_id: str):
+    """Get meeting details by ID"""
+    try:
+        meeting = db.get_meeting_by_id(meeting_id)
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # Enrich with participant and job details
+        user = db.get_user_profile(meeting['user_id'])
+        job = db.get_job_by_id(meeting['job_id'])
+        application = db.get_application_by_id(meeting['application_id'])
+        
+        meeting['candidate_name'] = user.get('name') if user else None
+        meeting['candidate_email'] = user.get('email') if user else None
+        meeting['job_title'] = job['title'] if job else None
+        meeting['company'] = job['company'] if job else None
+        meeting['overall_score'] = application.get('overall_score') if application else None
+        
+        return meeting
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/meetings/room/{room_name}", tags=["Meetings"])
+async def get_meeting_by_room(room_name: str):
+    """Get meeting details by room name (for joining meeting)"""
+    try:
+        result = db.client.table('meetings').select('*').eq('room_name', room_name).single().execute()
+        meeting = result.data
+        
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting room not found")
+        
+        # Enrich with participant details
+        user = db.get_user_profile(meeting['user_id'])
+        job = db.get_job_by_id(meeting['job_id'])
+        
+        return {
+            "meeting_id": meeting['id'],
+            "room_name": meeting['room_name'],
+            "scheduled_time": meeting['scheduled_time'],
+            "duration_minutes": meeting['duration_minutes'],
+            "status": meeting['status'],
+            "candidate": {
+                "user_id": meeting['user_id'],
+                "name": user.get('name') if user else None
+            },
+            "job": {
+                "job_id": meeting['job_id'],
+                "title": job['title'] if job else None,
+                "company": job['company'] if job else None
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/meetings/user/{user_id}", tags=["Meetings"])
+async def get_user_meetings(
+    user_id: str,
+    status: Optional[str] = Query(None, description="Filter by status")
+):
+    """Get all meetings for a user (candidate)"""
+    try:
+        meetings = db.get_user_meetings(user_id, status)
+        
+        # Enrich with job details
+        for meeting in meetings:
+            job = db.get_job_by_id(meeting['job_id'])
+            if job:
+                meeting['job_title'] = job['title']
+                meeting['company'] = job['company']
+        
+        return {
+            "user_id": user_id,
+            "total": len(meetings),
+            "meetings": meetings
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/meetings/recruiter/{recruiter_id}", tags=["Meetings"])
+async def get_recruiter_meetings(
+    recruiter_id: str,
+    status: Optional[str] = Query(None, description="Filter by status")
+):
+    """Get all meetings for a recruiter"""
+    try:
+        meetings = db.get_recruiter_meetings(recruiter_id, status)
+        
+        # Enrich with candidate and job details
+        for meeting in meetings:
+            user = db.get_user_profile(meeting['user_id'])
+            job = db.get_job_by_id(meeting['job_id'])
+            
+            if user:
+                meeting['candidate_name'] = user.get('name')
+                meeting['candidate_email'] = user.get('email')
+            if job:
+                meeting['job_title'] = job['title']
+                meeting['company'] = job['company']
+        
+        return {
+            "recruiter_id": recruiter_id,
+            "total": len(meetings),
+            "meetings": meetings
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/meetings/{meeting_id}/status", tags=["Meetings"])
+async def update_meeting_status(
+    meeting_id: str,
+    status: str = Form(...),
+    notes: str = Form(None)
+):
+    """Update meeting status (scheduled, ongoing, completed, cancelled, no_show)"""
+    valid_statuses = ["scheduled", "ongoing", "completed", "cancelled", "no_show"]
+    
+    if status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        )
+    
+    try:
+        success = db.update_meeting_status(meeting_id, status, notes)
+        if not success:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # If meeting completed, update application status to "interviewed"
+        if status == "completed":
+            meeting = db.get_meeting_by_id(meeting_id)
+            if meeting:
+                db.update_application_status(meeting['application_id'], 'interviewed', notes)
+        
+        return {
+            "success": True,
+            "meeting_id": meeting_id,
+            "status": status
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/meetings/{meeting_id}", tags=["Meetings"])
+async def cancel_meeting(meeting_id: str):
+    """Cancel/delete a meeting"""
+    try:
+        success = db.delete_meeting(meeting_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        return {
+            "success": True,
+            "message": f"Meeting {meeting_id} cancelled"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/meetings/application/{application_id}", tags=["Meetings"])
+async def get_application_meeting(application_id: str):
+    """Get meeting for a specific application"""
+    try:
+        meeting = db.get_meeting_by_application(application_id)
+        if not meeting:
+            return {
+                "has_meeting": False,
+                "application_id": application_id
+            }
+        
+        # Enrich with details
+        user = db.get_user_profile(meeting['user_id'])
+        job = db.get_job_by_id(meeting['job_id'])
+        
+        meeting['candidate_name'] = user.get('name') if user else None
+        meeting['job_title'] = job['title'] if job else None
+        meeting['company'] = job['company'] if job else None
+        meeting['has_meeting'] = True
+        
+        return meeting
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
 # ANALYTICS
 # ============================================================================
 
