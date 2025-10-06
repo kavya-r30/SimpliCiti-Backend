@@ -1,8 +1,6 @@
 import os
-import smtplib
+import resend
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from typing import Dict, Any
 
 from models import ResumeAnalysis
@@ -11,10 +9,8 @@ logger = logging.getLogger(__name__)
 
 class EmailComposer:
     def __init__(self):
-        self.smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        self.email_user = os.getenv("EMAIL_USER")
-        self.email_password = os.getenv("EMAIL_PASSWORD")
+        resend.api_key = os.getenv("RESEND_API_KEY")
+        self.sender_email = os.getenv("RESEND_SENDER_EMAIL", "onboarding@resend.dev")
         
         self.templates = {
             "acceptance": {
@@ -137,28 +133,23 @@ Hiring Team
         return '\n'.join([f"• {suggestion}" for suggestion in suggestions[:3]])
     
     def send_email(self, to_email: str, email_data: Dict[str, str]) -> bool:
-        """Send email via SMTP"""
-        if not all([self.email_user, self.email_password]):
-            logger.warning("Email credentials not configured")
+        """Send email via Resend API"""
+        if not resend.api_key:
+            logger.warning("Resend API key not configured")
             return False
         
         try:
-            msg = MIMEMultipart()
-            msg['From'] = self.email_user
-            msg['To'] = to_email
-            msg['Subject'] = email_data["subject"]
+            params: resend.Emails.SendParams = {
+                "from": self.sender_email,
+                "to": [to_email],
+                "subject": email_data["subject"],
+                "html": f"<pre style='font-family: Arial, sans-serif; white-space: pre-wrap;'>{email_data['body']}</pre>",
+            }
             
-            msg.attach(MIMEText(email_data["body"], 'plain'))
-            
-            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-            server.starttls()
-            server.login(self.email_user, self.email_password)
-            server.sendmail(self.email_user, to_email, msg.as_string())
-            server.quit()
-            
-            logger.info(f"Email sent successfully to {to_email}")
+            email: resend.Email = resend.Emails.send(params)
+            logger.info(f"Email sent successfully to {to_email} with ID: {email.get('id')}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
+            logger.error(f"Failed to send email via Resend: {e}")
             return False
